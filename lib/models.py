@@ -4,6 +4,7 @@ import os
 from tqdm import tqdm
 import numpy as np
 
+
 def accuracy(preds, labels):
     _, pred_classes = torch.max(preds, 1)
     correct = (pred_classes == labels).float()
