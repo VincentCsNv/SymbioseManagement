@@ -180,8 +180,9 @@ class TreeDataset(torch.utils.data.Dataset):
     def load_lidar_data(self, path):
         with laspy.open(path) as fh:
             las = fh.read()
-        output = np.column_stack([las.x, las.y, las.z, las.intensity])
+        output = np.column_stack([las.x, las.y, las.z])
         output = self.normalize_point_cloud(output, target_points = self.target_points)
+        output = np.transpose(output)  # Convertir en (C, N)
         return output
     
     # Visualization and evaluation 
