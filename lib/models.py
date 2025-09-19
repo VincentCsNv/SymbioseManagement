@@ -15,6 +15,8 @@ def evaluate(model,valid_dl,loss_func):
     batch_losses, batch_accs=[],[]
     for images,labels in valid_dl:
         predicted=model(images)
+        if type(predicted)!= torch.Tensor : predicted = predicted[0]
+
         batch_losses.append(loss_func(predicted,labels))
         batch_accs.append(accuracy(predicted,labels))
     epoch_avg_loss=torch.stack(batch_losses).mean().item()# To keep only the mean
@@ -48,6 +50,8 @@ def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr 
         for images, labels in train_dl:
           optimizer.zero_grad() #Gradient set to zero to avoid accumulation during training (Backprog at the scale of mini-batch not over all the dataset)
           predicted=model(images)
+          if type(predicted)!= torch.Tensor : predicted = predicted[0]
+
           loss=loss_func(predicted,labels)
           train_losses.append(loss)
           loss.backward() #Compute backpropagation
