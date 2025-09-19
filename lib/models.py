@@ -19,7 +19,7 @@ def evaluate(model,valid_dl,loss_func):
     epoch_avg_loss=torch.stack(batch_losses).mean().item()# To keep only the mean
     epoch_avg_acc=torch.stack(batch_accs).mean().item()
     return epoch_avg_loss,epoch_avg_acc
-def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr = "True"):
+def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr = "True", SAVE = True):
 
     #Choice of the optimization function, Weight decay is associated to L2 Norm
     if optim == "Adam":
@@ -76,19 +76,15 @@ def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr 
               ,'Training accuracy:', epoch_train_acc
               , 'validation accuracy :',epoch_avg_acc)
         #Save the best model
-        SAVE = False
+        
         if SAVE:
-            if best_epoch == -1 or epoch_avg_acc > best_epoch:
-                best_epoch = epoch_avg_acc
-                torch.save(model.state_dict(), f'model_optim_{optim}_epoch_{epoch}_weights.pth')
-            #remove old weight
-            if best_epoch_nb != -1:
-                os.remove(f'model_optim_{optim}_epoch_{best_epoch_nb}_weights.pth')
-
-        best_epoch_nb = epoch
-        #Save the last epoch weight
-        if SAVE:
-            torch.save(model.state_dict(), f'model_optim_{optim}_best_epoch_weights.pth')
+          if best_epoch == -1 or epoch_avg_acc > best_epoch:
+            best_epoch = epoch_avg_acc
+            torch.save(model.state_dict(), f'model_optim_{optim}_epoch_{epoch}_weights.pth')
+            if best_epoch_nb != -1 :
+              #remove old weight
+              os.remove(f'model_optim_{optim}_epoch_{best_epoch_nb}_weights.pth')
+            best_epoch_nb = epoch
     #Save the last epoch weight
     if SAVE:
         torch.save(model.state_dict(), f'model_optim_{optim}_epoch_{epoch}_weights.pth')
