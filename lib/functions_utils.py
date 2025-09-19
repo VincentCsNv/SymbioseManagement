@@ -3,26 +3,9 @@ import pandas as pd
 import numpy as np
 import glob 
 import rasterio
+import matplotlib.pyplot as plt
 #Data manipulation 
 
-def extrating_data_to_df(DATA_dir):
-    print("Getting all the files .tiff and .laz path...")
-    aerial_files = glob.glob(DATA_dir + "**/**/**/*.tiff")
-    lidar_files = glob.glob(DATA_dir + "**/**/**/*.laz")
-    #Sort the files to ensure the matching between aerial and lidar files
-    aerial_files.sort()
-    lidar_files.sort()
-
-    files_path = aerial_files + lidar_files
-    print(f"Number of files : {len(aerial_files)+len(lidar_files)}")
-
-
-    #Creating a dataframe with the files path and extracting metadata from the path
-    data_df = pd.DataFrame(aerial_files, columns=['aerial_path'])
-    data_df["lidar_path"] = lidar_files
-    data_df["species"] = data_df["aerial_path"].apply(lambda x: x.split("/")[-4])
-    data_df["type"] = data_df["aerial_path"].apply(lambda x: x.split("/")[-3])
-    return data_df
 
 def rep_df_train_test_val(data_df, repartition, random_seed):
     """
@@ -48,6 +31,32 @@ def rep_df_train_test_val(data_df, repartition, random_seed):
         data_df.loc[specie_df_val.index, 'dataset'] = 'val'
         data_df.loc[specie_df_test.index, 'dataset'] = 'test'
     return data_df
+
+def extrating_data_to_df(DATA_dir,repartition = { 'train': 0.8, 'val': 0.1, 'test': 0.1}, random_seed = 42, new_rep = False):
+    print("Getting all the files .tiff and .laz path...")
+    aerial_files = glob.glob(DATA_dir + "**/**/**/*.tiff")
+    lidar_files = glob.glob(DATA_dir + "**/**/**/*.laz")
+    #Sort the files to ensure the matching between aerial and lidar files
+    aerial_files.sort()
+    lidar_files.sort()
+
+    files_path = aerial_files + lidar_files
+    print(f"Number of files : {len(aerial_files)+len(lidar_files)}")
+
+
+    #Creating a dataframe with the files path and extracting metadata from the path
+    data_df = pd.DataFrame(aerial_files, columns=['aerial_path'])
+    data_df["lidar_path"] = lidar_files
+    data_df["species"] = data_df["aerial_path"].apply(lambda x: x.split("/")[-4])
+    data_df["type"] = data_df["aerial_path"].apply(lambda x: x.split("/")[-3])
+    if  new_rep:
+        data_df = rep_df_train_test_val(data_df, repartition = repartition, random_seed = random_seed)
+    else:
+        data_df["dataset"] = data_df["aerial_path"].apply(lambda x: x.split("/")[-2])
+
+    return data_df
+
+
 
 def detailed_distribution(df):
     print("=" * 50)
@@ -89,212 +98,125 @@ def detailed_distribution(df):
 
 
 
-import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
-import pandas as pd
-import numpy as np
-import laspy
-import os
+def create_dataloader(df,batch_size = 4, input_type = "imagery", transform=None):
+    """
+    Create dataloaders for training, validation and testing.
 
-class RGBLidarDataset(Dataset):
-    """Creation of dataloader for lidar and Vis-NIR aerial images for tree species classification"""
-    
-    def __init__(self, df, mode='train', input_type ='aerial', transform=None, target_size=(224, 224)):
-        """
-        Args:
-            df: DataFrame with colomns ['rgb_path', 'lidar_path', 'species', ...]
-            mode: 'train', 'val', 'test'
-            input_type: 'lidar', 'aerial', 'fusion'
-            transform: transform to apply
-            target_size: target size for images and heightmaps
-        """
-        self.df = df.reset_index(drop=True)
-        self.mode = mode
+    Args:
+        df (pd.DataFrame): DataFrame containing file paths and labels.
+        batch_size (int): Batch size for the dataloaders.
+        input_type (str): Type of input data ('aerial', 'lidar', 'fusion').
+    Returns:
+        dict: dataloader
+    """
+    #creating dataset 
+    dataset = TreeDataset(df, input_type=input_type, transform = transform)
+
+    #creating dataloaders
+    dataloader = DataLoader(
+                dataset, 
+                batch_size = batch_size, 
+                shuffle=True,
+                num_workers=0
+            )
+
+    return dataloader
+
+
+class TreeDataset(torch.utils.data.Dataset):
+    def __init__(self, df, input_type='imagery', transform=None, target_points=100000):
+        self.df = df
         self.input_type = input_type
-        self.target_size = target_size
-        
-        # Transform step (augmentation only for training)
-        if transform is None:
-            self.transform = self._get_default_transforms()
-        else:
-            self.transform = transform
-            
-        # Mapping of classes 
+        self.transform = transform
         self.class_to_idx = {cls: idx for idx, cls in enumerate(df['species'].unique())}
         self.idx_to_class = {idx: cls for cls, idx in self.class_to_idx.items()}
         self.num_classes = len(self.class_to_idx)
-        
-        print(f"Dataset of {len(self.df)} samples, divised in {self.num_classes} classes ({list(self.class_to_idx.keys())})")
-        print(f"Input type: {input_type}")
-    
+        self.target_points = target_points
     def __len__(self):
         return len(self.df)
     
     def __getitem__(self, idx):
-        """Charge un échantillon"""
+        row = self.df.iloc[idx]
+        label = self.class_to_idx[row['species']]
         
-        try:
-            row = self.df.iloc[idx]
-            
-            # 1. CHARGEMENT Vis+NIR
-            aerial_image = None
-            if self.input_type in ['fusion', 'aerial']:
-                aerial_image = self._load_aerial(row['aerial_path'])
-
-            # 2. CHARGEMENT LIDAR
-            lidar_data = None
-            if self.input_type in ['fusion', 'lidar']:
-                lidar_data = self._load_lidar(row['lidar_path'])
-            
-            # 3. FUSION/PRÉPARATION
-            input_data = self._prepare_input(aerial_image, lidar_data)
-
-            # 4. LABEL
-            label = self.class_to_idx[row['species']]
-            
-            # 5. TRANSFORMATIONS
-            if self.transform:
-                input_data = self.transform(input_data)
-            
-            return input_data, label
-            
-        except Exception as e:
-            print(f"❌ Erreur chargement échantillon {idx}: {e}")
-            # If error a random sample is returned
-            return self.__getitem__(np.random.randint(0, len(self.df)))
-    
-    def _load_aerial(self, rgb_path):
-        """Charge aerial image """
-        if not os.path.exists(rgb_path):
-            raise FileNotFoundError(f"aerial file not found: {rgb_path}")
-        with rasterio.open(rgb_path) as src:
-           img = src.read()
-           img = np.moveaxis(img, 0, -1) #switch channel order
-        return np.array(img)
-    
-    def _load_lidar(self, lidar_path):
-        """Charge données LiDAR et crée heightmap"""
-        if not os.path.exists(lidar_path):
-            raise FileNotFoundError(f"LiDAR file not found: {lidar_path}")
+        # Load aerial image
+        if self.input_type in ['imagery', 'fusion']:
+            inputs = self.load_aerial_image(row["aerial_path"])
+        else:
+            inputs = self.load_lidar_data(row["lidar_path"])
         
-        # Loading LAZ
-        with laspy.open(lidar_path) as fh:
+        if self.transform is not None:
+            inputs = self.transform(inputs)
+
+        label = self.class_to_idx[row["species"]]
+
+        return torch.tensor(inputs, dtype=torch.float32), torch.tensor(label, dtype=torch.long)
+
+    def load_aerial_image(self, path):
+        with rasterio.open(path) as src:
+            img = src.read()  # Lire toutes les bandes
+            #resize to 4*128*128
+            img = np.resize(img, (4, 128, 128))
+            img = np.transpose(img, (0, 1, 2))  # Convertir en HWC
+            img = img / 255.0  # Normalisation
+        return img
+    def normalize_point_cloud(self,points, target_points=1024):
+    
+        if len(points) > target_points:
+            # Random sub-sampling
+            indices = np.random.choice(len(points), target_points, replace=False)
+            return points[indices]
+        
+        elif len(points) < target_points:
+            # Random over-sampling
+            indices = np.random.choice(len(points), target_points, replace=True)
+            return points[indices]
+        
+        return points 
+
+    def load_lidar_data(self, path):
+        with laspy.open(path) as fh:
             las = fh.read()
-        
-        # Heightmap Creation
-        heightmap = self._create_heightmap(las.x, las.y, las.z, las)
-        return heightmap
+        output = np.column_stack([las.x, las.y, las.z, las.intensity])
+        output = self.normalize_point_cloud(output, target_points = self.target_points)
+        return output
     
-    def _create_heightmap(self, x, y, z, las):
-        """CHECK THAT FUNCTIONS"""
-        
-        H, W = self.target_size
-        
-        # Projection grid 
-        x_min, x_max = x.min(), x.max()
-        y_min, y_max = y.min(), y.max()
-        
-        # Avoid division by zero
-        if (x_max - x_min) == 0 or (y_max - y_min) == 0:
-            return np.zeros((H, W, 4), dtype=np.float32)
-        
-        # Grid indixes
-        x_indices = ((x - x_min) / (x_max - x_min) * (W - 1)).astype(int)
-        y_indices = ((y - y_min) / (y_max - y_min) * (H - 1)).astype(int)
-        
-        # Clip pour éviter out of bounds
-        x_indices = np.clip(x_indices, 0, W - 1)
-        y_indices = np.clip(y_indices, 0, H - 1)
-        
-        # Création des canaux
-        heightmap = np.zeros((H, W, 4), dtype=np.float32)
-        
-        # Canal 0: Hauteur maximale
-        for i in range(len(x)):
-            row, col = y_indices[i], x_indices[i]
-            heightmap[row, col, 0] = max(heightmap[row, col, 0], z[i])
-        
-        # Canal 1: Densité (nombre de points)
-        for i in range(len(x)):
-            row, col = y_indices[i], x_indices[i]
-            heightmap[row, col, 1] += 1
-        
-        # Canal 2: Intensité moyenne
-        if hasattr(las, 'intensity'):
-            intensity_sum = np.zeros((H, W))
-            for i in range(len(x)):
-                row, col = y_indices[i], x_indices[i]
-                intensity_sum[row, col] += las.intensity[i]
-            
-            # Moyenne (évite division par zéro)
-            mask = heightmap[:, :, 1] > 0
-            heightmap[mask, 2] = intensity_sum[mask] / heightmap[mask, 1]
-        
-        # Canal 3: Ratio premier/dernier retour
-        first_returns = np.zeros((H, W))
-        last_returns = np.zeros((H, W))
-        
-        for i in range(len(x)):
-            row, col = y_indices[i], x_indices[i]
-            if las.return_number[i] == 1:
-                first_returns[row, col] += 1
-            if las.return_number[i] == las.number_of_returns[i]:
-                last_returns[row, col] += 1
-        
-        # Ratio (évite division par zéro)
-        mask = last_returns > 0
-        heightmap[mask, 3] = first_returns[mask] / last_returns[mask]
-        
-        return heightmap
-    
-    def _prepare_input(self, aerial_image, lidar_data):
-        """Prépare input selon méthode de fusion"""
-        
-        if self.input_type == 'fusion':
-            # Fusion 
-            if aerial_image is None or lidar_data is None:
-                raise ValueError("Fusion need Lidar and Aerial data")
-            
-            # RGB: (H, W, 3) + LiDAR: (H, W, 4) → (H, W, 7)
-            fused = np.concatenate([aerial_image, lidar_data], axis=-1)
-            return fused.astype(np.float32) / 255.0  # Normalisation
+    # Visualization and evaluation 
+def getting_metrics(results,EPOCHS):
+    avg_training_accuracy, avg_validation_accuracy =[], []
+    avg_training_loss, avg_validation_loss=[],[]
+    lr = []
+    for result in results:
+        avg_training_accuracy.append(result['avg_train_acc'])
+        avg_validation_accuracy.append(result['avg_val_acc'])
+        avg_validation_loss.append(result['avg_valid_loss'])
+        avg_training_loss.append(result['avg_train_loss'])
+        lr = np.concatenate((lr,result['lrs']))
+    epoch_count=[]
+    for i in range(1,EPOCHS+1):
+        epoch_count.append(i)
+    return avg_training_accuracy, avg_validation_accuracy, avg_training_loss, avg_validation_loss, lr, epoch_count
 
-        elif self.input_type == 'aerial':
-            return aerial_image.astype(np.float32) / 255.0
+def plot_metric(train_metric,test_metric,label,epoch_count,option_label = "",color = "orange"):
+  plt.title(f"{label} per epoch")
+  plt.plot(epoch_count,train_metric,label=f"Training {label} {option_label}",linewidth = '1',color = color)
+  plt.plot(epoch_count,test_metric,"--",label=f"Test {label} {option_label}",linewidth = '1',color = color)
+  plt.xlabel('Epoch')
+  plt.ylabel(f'{label} per epoch')
+  plt.legend()
+  
+def plot_all_metrics(tr_acc,ts_acc,tr_loss,ts_loss,lr,epoch_count,label,color="orange"):
+  #Visualize metrics over epochs
 
-        elif self.input_type == 'lidar':
-            return lidar_data.astype(np.float32)
-        
-        else:
-            raise ValueError(f"Méthode fusion inconnue: {self.fusion_method}")
-    
-    def _get_default_transforms(self):
-        """Transformations par défaut selon le mode"""
+  plt.subplot(1,3,1)
+  plot_metric(tr_loss,ts_loss,"Loss",epoch_count,option_label = label,color = color)
+  plt.subplot(1,3,2)
+  plot_metric(tr_acc,ts_acc,"Accuracy",epoch_count,option_label = label, color =color)
 
-        
-        
-        # Transformations pour rgb et lidar
-        if self.mode == "train":
-            return transforms.Compose([
-                transforms.ToTensor(),
-                transforms.RandomHorizontalFlip(0.5),
-                transforms.RandomRotation(10),
-            ])
-        else:
-            return transforms.Compose([
-                transforms.ToTensor(),
-            ])
-    
-    def get_class_weights(self):
-        """Compute class weights for balanced loss"""
-        class_counts = self.df['species'].value_counts()
-        total_samples = len(self.df)
-        
-        weights = []
-        for cls in self.class_to_idx.keys():
-            weight = total_samples / (len(self.class_to_idx) * class_counts[cls])
-            weights.append(weight)
-        
-        return torch.FloatTensor(weights)
+  #Visualize lr evolution
+  plt.subplot(1,3,3)
+  epoch = epoch_count
+  plt.plot(epoch,lr)
+  plt.title("learning_rate over epochs")
+  plt.xlabel('Epoch')
+  plt.ylabel('Learning rate')
