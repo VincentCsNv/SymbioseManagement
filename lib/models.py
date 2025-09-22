@@ -10,12 +10,13 @@ def accuracy(preds, labels):
     correct = (pred_classes == labels).float()
     acc = correct.sum() / len(correct)
     return acc
-def evaluate(model,valid_dl,loss_func):
+def evaluate(model,valid_dl,loss_func, device='cpu'):
     model.eval()
     batch_losses, batch_accs=[],[]
     for images,labels in valid_dl:
+        images, labels = images.to(device), labels.to(device)
         predicted=model(images)
-        if type(predicted)!= torch.Tensor : predicted = predicted[0]
+        if type(predicted)!= torch.Tensor : predicted = predicted[0] #In case of PointNet, output is a tuple
 
         batch_losses.append(loss_func(predicted,labels))
         batch_accs.append(accuracy(predicted,labels))
@@ -48,21 +49,22 @@ def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr 
 
         #Compute over a minibatch
         for images, labels in train_dl:
-          optimizer.zero_grad() #Gradient set to zero to avoid accumulation during training (Backprog at the scale of mini-batch not over all the dataset)
-          predicted=model(images)
-          if type(predicted)!= torch.Tensor : predicted = predicted[0]
+            images, labels = images.to(device), labels.to(device)
+            optimizer.zero_grad() #Gradient set to zero to avoid accumulation during training (Backprog at the scale of mini-batch not over all the dataset)
+            predicted=model(images)
+            if type(predicted)!= torch.Tensor : predicted = predicted[0] #In case of PointNet, output is a tuple
 
-          loss=loss_func(predicted,labels)
-          train_losses.append(loss)
-          loss.backward() #Compute backpropagation
-          optimizer.step() # Update weights
+            loss=loss_func(predicted,labels)
+            train_losses.append(loss)
+            loss.backward() #Compute backpropagation
+            optimizer.step() # Update weights
     # keep track of learning rate and metrics (here as the dataset is balanced, accuracy alone is relevant)
      
-        train_batch_accs.append(accuracy(predicted,labels))
+            train_batch_accs.append(accuracy(predicted,labels))
           
-        lrs.append(optimizer.param_groups[0]['lr'])
-        if scheduler_lr :
-            scheduler.step() #Update learning rate
+            lrs.append(optimizer.param_groups[0]['lr'])
+            if scheduler_lr :
+                scheduler.step() #Update learning rate
 
 
         epoch_train_acc=torch.stack(train_batch_accs).mean().item()
