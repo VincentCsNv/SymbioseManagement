@@ -23,7 +23,7 @@ def evaluate(model,valid_dl,loss_func, device='cpu'):
     epoch_avg_loss=torch.stack(batch_losses).mean().item()# To keep only the mean
     epoch_avg_acc=torch.stack(batch_accs).mean().item()
     return epoch_avg_loss,epoch_avg_acc
-def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, scheduler_lr = "True", SAVE = True):
+def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, device  = "cpu",scheduler_lr = "True", SAVE = True):
 
     #Choice of the optimization function, Weight decay is associated to L2 Norm
     if optim == "Adam":
