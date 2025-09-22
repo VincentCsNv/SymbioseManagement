@@ -69,7 +69,7 @@ def train(model,train_dl,valid_dl,epochs, max_lr, loss_func,optim, device  = "cp
 
         epoch_train_acc=torch.stack(train_batch_accs).mean().item()
         epoch_train_loss=torch.stack(train_losses).mean().item()
-        epoch_avg_loss,epoch_avg_acc = evaluate(model,valid_dl,loss_func) #having the avg metrics for the epoch.
+        epoch_avg_loss,epoch_avg_acc = evaluate(model,valid_dl,loss_func,device =device) #having the avg metrics for the epoch.
 
         results.append({'avg_valid_loss': epoch_avg_loss,
                         'avg_val_acc': epoch_avg_acc,

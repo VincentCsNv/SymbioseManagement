@@ -101,7 +101,7 @@ def detailed_distribution(df):
 
 
 
-def create_dataloader(df,batch_size = 4, input_type = "imagery", transform=None):
+def create_dataloader(df,batch_size = 4, input_type = "imagery", transform=None,nb_points_max=10000):
     """
     Create dataloaders for training, validation and testing.
 
@@ -113,7 +113,7 @@ def create_dataloader(df,batch_size = 4, input_type = "imagery", transform=None)
         dict: dataloader
     """
     #creating dataset 
-    dataset = TreeDataset(df, input_type=input_type, transform = transform)
+    dataset = TreeDataset(df, input_type=input_type, transform = transform,target_points=nb_points_max)
 
     #creating dataloaders
     dataloader = DataLoader(
